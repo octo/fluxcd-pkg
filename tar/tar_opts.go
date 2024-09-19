@@ -16,6 +16,12 @@ limitations under the License.
 
 package tar
 
+import (
+	"strings"
+
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
+)
+
 // TarOption represents options to be applied to Tar.
 type TarOption func(*tarOpts)
 
@@ -41,8 +47,27 @@ func WithSkipGzip() TarOption {
 	}
 }
 
+// WithIgnore allows to exclude certain files from being extracted.
+func WithIgnore(m gitignore.Matcher) TarOption {
+	return func(t *tarOpts) {
+		t.ignoreMatcher = m
+	}
+}
+
 func (t *tarOpts) applyOpts(tarOpts ...TarOption) {
 	for _, clientOpt := range tarOpts {
 		clientOpt(t)
 	}
+}
+
+// ignore is a convenience function around t.ignoreMatcher.Match(). It handles
+// the absense of a matcher gracefully and takes care of splitting the path into
+// its components. The `path` argument must be a slash-delimited path, i.e. the
+// file name from the tar archive *before* it gets converted to a filepath.
+func (t *tarOpts) ignore(path string, isDir bool) bool {
+	if t.ignoreMatcher == nil {
+		return false
+	}
+
+	return t.ignoreMatcher.Match(strings.Split(path, "/"), isDir)
 }

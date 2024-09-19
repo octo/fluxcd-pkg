@@ -22,6 +22,7 @@ import (
 	"time"
 
 	securejoin "github.com/cyphar/filepath-securejoin"
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 const (
@@ -45,6 +46,9 @@ type tarOpts struct {
 
 	// skipGzip skip gzip reader an un-tar a plain tar file.
 	skipGzip bool
+
+	// ignoreMatcher allows to exclude specific files from extraction.
+	ignoreMatcher gitignore.Matcher
 }
 
 // Untar reads the gzip-compressed tar file from r and writes it into dir.
@@ -120,6 +124,10 @@ func Untar(r io.Reader, dir string, inOpts ...TarOption) (err error) {
 
 		fi := f.FileInfo()
 		mode := fi.Mode()
+
+		if opts.ignore(f.Name, mode.IsDir()) {
+			continue
+		}
 
 		switch {
 		case mode.IsRegular():

@@ -21,10 +21,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 type untarTestCase struct {
@@ -35,6 +39,8 @@ type untarTestCase struct {
 	content         []byte
 	wantErr         string
 	maxUntarSize    int
+	ignore          gitignore.Matcher
+	wantNotExist    bool
 }
 
 func TestUntar(t *testing.T) {
@@ -128,6 +134,39 @@ func TestUntar(t *testing.T) {
 			targetDir: symlink,
 			wantErr:   fmt.Sprintf(`dir '%s' must be a directory`, symlink),
 		},
+		{
+			name:            "ignore",
+			fileName:        "file1",
+			content:         geRandomContent(256),
+			targetDir:       targetDirOutput,
+			secureTargetDir: targetDirOutput,
+			ignore: gitignore.NewMatcher([]gitignore.Pattern{
+				gitignore.ParsePattern("file1", nil),
+			}),
+			wantNotExist: true,
+		},
+		{
+			name:            "ignore does not match",
+			fileName:        "file1",
+			content:         geRandomContent(256),
+			targetDir:       targetDirOutput,
+			secureTargetDir: targetDirOutput,
+			ignore: gitignore.NewMatcher([]gitignore.Pattern{
+				gitignore.ParsePattern("no_match", nil),
+			}),
+			wantNotExist: false,
+		},
+		{
+			name:            "ignore with glob",
+			fileName:        "path/to/file.ignored",
+			content:         geRandomContent(256),
+			targetDir:       targetDirOutput,
+			secureTargetDir: targetDirOutput,
+			ignore: gitignore.NewMatcher([]gitignore.Pattern{
+				gitignore.ParsePattern("*.ignored", nil),
+			}),
+			wantNotExist: true,
+		},
 	}
 
 	for _, tt := range cases {
@@ -142,6 +181,9 @@ func TestUntar(t *testing.T) {
 			opts := make([]TarOption, 0)
 			if tt.maxUntarSize != 0 {
 				opts = append(opts, WithMaxUntarSize(tt.maxUntarSize))
+			}
+			if tt.ignore != nil {
+				opts = append(opts, WithIgnore(tt.ignore))
 			}
 
 			err = Untar(f, tt.targetDir, opts...)
@@ -161,8 +203,18 @@ func TestUntar(t *testing.T) {
 			if tt.wantErr == "" {
 				abs := filepath.Join(tt.secureTargetDir, tt.fileName)
 				fi, err := os.Stat(abs)
-				if err != nil {
+
+				gotNotExist := errors.Is(err, fs.ErrNotExist)
+				if err != nil && gotNotExist != tt.wantNotExist {
 					t.Errorf("stat %q: %v", abs, err)
+					return
+				}
+
+				if !gotNotExist && tt.wantNotExist {
+					t.Errorf("os.Stat(%q) = (%v, nil), want %v", abs, fi, fs.ErrNotExist)
+				}
+
+				if tt.wantNotExist {
 					return
 				}
 
